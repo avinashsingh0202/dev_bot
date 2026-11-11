@@ -52,12 +52,19 @@ Inbound mapping (`parseChatMessage()` in `src/routes/chat.ts`):
 
 Ignores events where `senderId === BOT_USER_ID`. Starts a request only when `@devbot` appears in the body (case-insensitive). Typical `action`: `chatMessageSent`.
 
+**POC allowlists** (env, comma-separated; empty = allow all for that dimension). Non-matches are ignored with **no reply**:
+
+| Env | POC default |
+|-----|-------------|
+| `ALLOWED_USER_IDS` | `661e62abed6eab0034a910ef` |
+| `ALLOWED_CONVERSATION_IDS` | `6af4f6f3e94e470001d1326e` |
+
 ```json
 {
   "action": "chatMessageSent",
   "messageId": "msg_123",
-  "conversationId": "conv_123",
-  "senderId": "U_ada",
+  "conversationId": "6af4f6f3e94e470001d1326e",
+  "senderId": "661e62abed6eab0034a910ef",
   "senderName": "Ada",
   "body": "@devbot fix the null check in auth.ts"
 }
@@ -86,8 +93,8 @@ curl -sS -X POST "http://localhost:3000/webhooks/chat" \
   -d '{
     "action": "chatMessageSent",
     "messageId": "m1",
-    "conversationId": "c1",
-    "senderId": "U_ada",
+    "conversationId": "6af4f6f3e94e470001d1326e",
+    "senderId": "661e62abed6eab0034a910ef",
     "senderName": "Ada",
     "body": "@devbot fix the flaky login test"
   }'

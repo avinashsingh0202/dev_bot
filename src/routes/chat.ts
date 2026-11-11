@@ -133,16 +133,40 @@ function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
 
-async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
-  const config = loadConfig();
-
-  if (msg.senderId === config.BOT_USER_ID) return;
+/**
+ * POC allowlists from env (ALLOWED_USER_IDS / ALLOWED_CONVERSATION_IDS).
+ * Empty set = unrestricted for that dimension. Bot self-messages always drop.
+ * Pure helper — unit-tested; processChatMessage calls this before any reply.
+ */
+export function isChatAllowed(
+  msg: Pick<ParsedChatMessage, "senderId" | "channelId">,
+  config: {
+    BOT_USER_ID: string;
+    allowedUserIds: Set<string>;
+    allowedConversationIds: Set<string>;
+  },
+): boolean {
+  if (msg.senderId === config.BOT_USER_ID) return false;
   if (
     config.allowedUserIds.size > 0 &&
     !config.allowedUserIds.has(msg.senderId)
   ) {
-    return;
+    return false;
   }
+  if (
+    config.allowedConversationIds.size > 0 &&
+    !config.allowedConversationIds.has(msg.channelId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
+  const config = loadConfig();
+
+  // Wrong sender / conversation → silent ignore (no chat reply)
+  if (!isChatAllowed(msg, config)) return;
 
   // Reply in an existing request thread
   if (msg.threadId) {

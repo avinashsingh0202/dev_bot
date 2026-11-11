@@ -17,16 +17,29 @@ const envSchema = z.object({
   CHAT_POST_URL: z.string().url(),
   CHAT_BOT_TOKEN: z.string().min(1),
   BOT_USER_ID: z.string().min(1),
+  /** Comma list; empty = allow all senders. POC default in .env.example. */
   ALLOWED_USER_IDS: z.string().optional().default(""),
+  /** Comma list of conversationIds; empty = allow all. POC default in .env.example. */
+  ALLOWED_CONVERSATION_IDS: z.string().optional().default(""),
   PUBLIC_BASE_URL: z.string().url(),
   MAX_CI_RETRIES: z.coerce.number().int().nonnegative().default(2),
 });
 
 export type Config = z.infer<typeof envSchema> & {
   allowedUserIds: Set<string>;
+  allowedConversationIds: Set<string>;
 };
 
 let cached: Config | null = null;
+
+function parseIdList(raw: string): Set<string> {
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (cached) return cached;
@@ -40,13 +53,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   const data = parsed.data;
-  const allowedUserIds = new Set(
-    data.ALLOWED_USER_IDS.split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-
-  cached = { ...data, allowedUserIds };
+  cached = {
+    ...data,
+    allowedUserIds: parseIdList(data.ALLOWED_USER_IDS),
+    allowedConversationIds: parseIdList(data.ALLOWED_CONVERSATION_IDS),
+  };
   return cached;
 }
 
