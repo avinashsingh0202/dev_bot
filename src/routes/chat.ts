@@ -121,12 +121,17 @@ export function parseChatMessage(body: unknown): ParsedChatMessage {
   };
 }
 
-function mentionsDevbot(text: string): boolean {
-  return /(^|\s)@devbot\b/i.test(text);
+/**
+ * New requests only: trimmed body must *start with* `@devbot` (case-insensitive).
+ * Mid-message mentions do not trigger. Thread replies skip this check.
+ */
+export function startsWithDevbotMention(text: string): boolean {
+  return /^@devbot\b/i.test(text.trim());
 }
 
-function stripMention(text: string): string {
-  return text.replace(/(^|\s)@devbot\b/gi, " ").replace(/\s+/g, " ").trim();
+/** Strip leading `@devbot` (+ following space) for the agent prompt. */
+export function stripDevbotPrefix(text: string): string {
+  return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
 function normalizeCommand(text: string): string {
@@ -245,10 +250,10 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     }
   }
 
-  // Case-insensitive @devbot mention in body (Isometrik text field)
-  if (!mentionsDevbot(msg.text)) return;
+  // New request only when trimmed body starts with @devbot (not every allowlisted msg)
+  if (!startsWithDevbotMention(msg.text)) return;
 
-  const prompt = stripMention(msg.text) || msg.text;
+  const prompt = stripDevbotPrefix(msg.text) || msg.text;
   const threadId = msg.threadId;
   const request = await createRequest({
     chatChannel: msg.channelId,

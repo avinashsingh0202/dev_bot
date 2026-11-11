@@ -50,7 +50,9 @@ Inbound mapping (`parseChatMessage()` in `src/routes/chat.ts`):
 | `channel_id` | `conversationId` |
 | `thread_id` | `parentMessageId` if present, else `messageId` (thread root) |
 
-Ignores events where `senderId === BOT_USER_ID`. Starts a request only when `@devbot` appears in the body (case-insensitive). Typical `action`: `chatMessageSent`.
+Ignores events where `senderId === BOT_USER_ID`. Does **not** act on every message in the allowlisted conversation.
+
+**New request trigger:** trimmed `body` must **start with** `@devbot` (case-insensitive), e.g. `@devbot test`. That prefix is stripped for the agent prompt. Mid-message `@devbot` does not start a request. Thread replies on an existing request still work without `@devbot` again. Typical `action`: `chatMessageSent`.
 
 **POC allowlists** (env, comma-separated; empty = allow all for that dimension). Non-matches are ignored with **no reply**:
 
@@ -66,7 +68,7 @@ Ignores events where `senderId === BOT_USER_ID`. Starts a request only when `@de
   "conversationId": "6af4f6f3e94e470001d1326e",
   "senderId": "661e62abed6eab0034a910ef",
   "senderName": "Ada",
-  "body": "@devbot fix the null check in auth.ts"
+  "body": "@devbot test"
 }
 ```
 
@@ -96,11 +98,11 @@ curl -sS -X POST "http://localhost:3000/webhooks/chat" \
     "conversationId": "6af4f6f3e94e470001d1326e",
     "senderId": "661e62abed6eab0034a910ef",
     "senderName": "Ada",
-    "body": "@devbot fix the flaky login test"
+    "body": "@devbot test"
   }'
 ```
 
-Thread commands (reply with `parentMessageId` = root `messageId`): `retry`, `stop`, `status`.
+Thread commands (reply with `parentMessageId` = root `messageId`; no `@devbot` needed): `retry`, `stop`, `status`.
 
 ## Other endpoints
 
