@@ -33,24 +33,37 @@ ngrok http 3000
 
 ## Register webhooks
 
-### Chat (outgoing → DevBot)
+### Chat (Isometrik → DevBot)
 
-Point your chat bot / outgoing webhook at:
+Point Isometrik outgoing webhook / event delivery at:
 
 `POST {PUBLIC_BASE_URL}/webhooks/chat`
 
-Body fields (generic adapter — see `parseChatMessage()` in `src/routes/chat.ts`):
+Inbound mapping (`parseChatMessage()` in `src/routes/chat.ts`):
+
+| DevBot field | Isometrik field |
+|--------------|-----------------|
+| `text` | `body` (fallback `notificationBody`) |
+| `sender_id` | `senderId` |
+| `sender_name` | `senderName` |
+| `message_id` | `messageId` |
+| `channel_id` | `conversationId` |
+| `thread_id` | `parentMessageId` if present, else `messageId` (thread root) |
+
+Ignores events where `senderId === BOT_USER_ID`. Starts a request only when `@devbot` appears in the body (case-insensitive). Typical `action`: `chatMessageSent`.
 
 ```json
 {
-  "message_id": "msg_123",
-  "thread_id": "thr_123",
-  "channel_id": "ch_123",
-  "sender_id": "U_ada",
-  "sender_name": "Ada",
-  "text": "@devbot fix the null check in auth.ts"
+  "action": "chatMessageSent",
+  "messageId": "msg_123",
+  "conversationId": "conv_123",
+  "senderId": "U_ada",
+  "senderName": "Ada",
+  "body": "@devbot fix the null check in auth.ts"
 }
 ```
+
+**Outbound:** set `CHAT_POST_URL` to Isometrik's **send-message** API. `src/clients/chat.ts` keeps a stable `postMessage(channelId, threadId, text)` surface; auth/body shape still needs official send-message docs (see TODO there — do not invent secrets).
 
 ### Cursor (agent status → DevBot)
 
@@ -65,22 +78,22 @@ On the sandbox repo → Settings → Webhooks → Add webhook:
 - Secret: same value as `GITHUB_WEBHOOK_SECRET`
 - Events: **Pull requests**, **Workflow runs**
 
-## Curl: simulate a chat mention
+## Curl: simulate an Isometrik mention
 
 ```bash
 curl -sS -X POST "http://localhost:3000/webhooks/chat" \
   -H "Content-Type: application/json" \
   -d '{
-    "message_id": "m1",
-    "thread_id": "t1",
-    "channel_id": "c1",
-    "sender_id": "U_ada",
-    "sender_name": "Ada",
-    "text": "@devbot fix the flaky login test"
+    "action": "chatMessageSent",
+    "messageId": "m1",
+    "conversationId": "c1",
+    "senderId": "U_ada",
+    "senderName": "Ada",
+    "body": "@devbot fix the flaky login test"
   }'
 ```
 
-Thread commands (reply in the same `thread_id`): `retry`, `stop`, `status`.
+Thread commands (reply with `parentMessageId` = root `messageId`): `retry`, `stop`, `status`.
 
 ## Other endpoints
 
@@ -94,7 +107,7 @@ Thread commands (reply in the same `thread_id`): `retry`, `stop`, `status`.
 
 ## Reuse notes
 
-- **Chat vendor**: only change `parseChatMessage()` and `src/clients/chat.ts` (`postMessage`).
+- **Chat vendor (Isometrik)**: inbound = `parseChatMessage()`; outbound = `src/clients/chat.ts` (`postMessage`). Mapping note: project `internal/isometrik-chat-mapping.md`.
 - **CI retry policy**: pure helper `decideCiRetry()` in `src/clients/github.ts` (unit-tested).
 - **Signature helpers**: `src/verify.ts` shared by Cursor + GitHub.
 - **Agent concurrency**: `src/queue.ts` caps at 3 running agents; extras get "Queued".

@@ -1,7 +1,8 @@
 /**
- * Inbound chat webhook.
+ * Inbound chat webhook (Isometrik-style payloads).
  * parseChatMessage() is the single adapter point for vendor field mapping —
- * update that function when sample JSON from the real chat vendor arrives.
+ * see /cursor/stores/self/internal/isometrik-chat-mapping.md for the table.
+ * Keep snake_case aliases so curl/examples and Phase 1 tests still work.
  */
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
@@ -18,70 +19,96 @@ import { enqueueOrLaunch } from "../queue.js";
 
 export interface ParsedChatMessage {
   messageId: string;
-  threadId: string | null;
+  /** parentMessageId when present; otherwise messageId (thread root). */
+  threadId: string;
   channelId: string;
   senderId: string;
   senderName: string;
   text: string;
+  /** e.g. chatMessageSent — informational; not required to process. */
+  action: string | null;
 }
 
 const rawChatSchema = z
   .object({
-    message_id: z.union([z.string(), z.number()]).optional(),
+    // Isometrik (primary)
+    action: z.string().optional(),
     messageId: z.union([z.string(), z.number()]).optional(),
+    conversationId: z.union([z.string(), z.number()]).optional(),
+    parentMessageId: z.union([z.string(), z.number()]).nullable().optional(),
+    senderId: z.union([z.string(), z.number()]).optional(),
+    senderName: z.string().optional(),
+    body: z.string().optional(),
+    notificationBody: z.string().optional(),
+    // Phase 1 / curl aliases (reuse)
+    message_id: z.union([z.string(), z.number()]).optional(),
     id: z.union([z.string(), z.number()]).optional(),
     thread_id: z.union([z.string(), z.number()]).nullable().optional(),
     threadId: z.union([z.string(), z.number()]).nullable().optional(),
     channel_id: z.union([z.string(), z.number()]).optional(),
     channelId: z.union([z.string(), z.number()]).optional(),
     sender_id: z.union([z.string(), z.number()]).optional(),
-    senderId: z.union([z.string(), z.number()]).optional(),
     user_id: z.union([z.string(), z.number()]).optional(),
     sender_name: z.string().optional(),
-    senderName: z.string().optional(),
     user_name: z.string().optional(),
     text: z.string().optional(),
     message: z.string().optional(),
-    body: z.string().optional(),
   })
   .passthrough();
 
 function asString(value: unknown): string | null {
-  if (value == null) return null;
+  if (value == null || value === "") return null;
   return String(value);
 }
 
 /**
  * Normalize inbound chat JSON into a stable shape.
- * Generic mapping until the real vendor sample JSON arrives —
- * prefer snake_case (spec), fall back to camelCase / common aliases.
+ * Isometrik first (body, conversationId, …); snake_case kept for curl reuse.
  */
 export function parseChatMessage(body: unknown): ParsedChatMessage {
   const parsed = rawChatSchema.parse(body ?? {});
+
   const messageId =
-    asString(parsed.message_id) ??
     asString(parsed.messageId) ??
+    asString(parsed.message_id) ??
     asString(parsed.id);
+
   const channelId =
-    asString(parsed.channel_id) ?? asString(parsed.channelId);
+    asString(parsed.conversationId) ??
+    asString(parsed.channel_id) ??
+    asString(parsed.channelId);
+
   const senderId =
-    asString(parsed.sender_id) ??
     asString(parsed.senderId) ??
+    asString(parsed.sender_id) ??
     asString(parsed.user_id);
+
   const senderName =
-    parsed.sender_name ??
     parsed.senderName ??
+    parsed.sender_name ??
     parsed.user_name ??
     "unknown";
-  const text = parsed.text ?? parsed.message ?? parsed.body ?? "";
-  const threadId =
-    asString(parsed.thread_id) ?? asString(parsed.threadId);
+
+  // Isometrik: body, then notificationBody; aliases for local curl fixtures
+  const text =
+    parsed.body ??
+    parsed.notificationBody ??
+    parsed.text ??
+    parsed.message ??
+    "";
 
   if (!messageId || !channelId || !senderId) {
     throw new Error(
-      "chat message missing required fields (message_id, channel_id, sender_id)",
+      "chat message missing required fields (messageId/conversationId/senderId)",
     );
   }
+
+  // Thread root = this message when parentMessageId is absent
+  const threadId =
+    asString(parsed.parentMessageId) ??
+    asString(parsed.thread_id) ??
+    asString(parsed.threadId) ??
+    messageId;
 
   return {
     messageId,
@@ -90,6 +117,7 @@ export function parseChatMessage(body: unknown): ParsedChatMessage {
     senderId,
     senderName,
     text: text.trim(),
+    action: parsed.action ?? null,
   };
 }
 
@@ -193,11 +221,11 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     }
   }
 
+  // Case-insensitive @devbot mention in body (Isometrik text field)
   if (!mentionsDevbot(msg.text)) return;
 
   const prompt = stripMention(msg.text) || msg.text;
-  // Use message id as provisional thread if the chat vendor has no threads yet.
-  const threadId = msg.threadId ?? msg.messageId;
+  const threadId = msg.threadId;
   const request = await createRequest({
     chatChannel: msg.channelId,
     chatThread: threadId,
@@ -213,7 +241,7 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     type: "received",
     source: "chat",
     summary: "On it",
-    payload: { prompt, sender: msg.senderName },
+    payload: { prompt, sender: msg.senderName, action: msg.action },
   });
 
   await enqueueOrLaunch({

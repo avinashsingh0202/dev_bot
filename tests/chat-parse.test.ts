@@ -2,8 +2,52 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseChatMessage } from "../src/routes/chat.js";
 
-describe("parseChatMessage", () => {
-  it("maps the spec snake_case shape", () => {
+describe("parseChatMessage (Isometrik)", () => {
+  it("maps Isometrik chatMessageSent fields", () => {
+    const msg = parseChatMessage({
+      action: "chatMessageSent",
+      messageId: "msg_root",
+      conversationId: "conv_1",
+      senderId: "user_ada",
+      senderName: "Ada",
+      body: "@devbot fix the flaky test",
+    });
+    assert.deepEqual(msg, {
+      messageId: "msg_root",
+      threadId: "msg_root", // no parent → thread root is this message
+      channelId: "conv_1",
+      senderId: "user_ada",
+      senderName: "Ada",
+      text: "@devbot fix the flaky test",
+      action: "chatMessageSent",
+    });
+  });
+
+  it("uses parentMessageId as thread when present", () => {
+    const msg = parseChatMessage({
+      action: "chatMessageSent",
+      messageId: "msg_reply",
+      parentMessageId: "msg_root",
+      conversationId: "conv_1",
+      senderId: "user_bob",
+      senderName: "Bob",
+      body: "status",
+    });
+    assert.equal(msg.threadId, "msg_root");
+    assert.equal(msg.messageId, "msg_reply");
+  });
+
+  it("falls back to notificationBody when body is absent", () => {
+    const msg = parseChatMessage({
+      messageId: "m2",
+      conversationId: "c",
+      senderId: "s",
+      notificationBody: "  @DevBot please look  ",
+    });
+    assert.equal(msg.text, "@DevBot please look");
+  });
+
+  it("still accepts Phase 1 snake_case curl fixtures", () => {
     const msg = parseChatMessage({
       message_id: "m1",
       thread_id: "t1",
@@ -19,34 +63,11 @@ describe("parseChatMessage", () => {
       senderId: "u1",
       senderName: "Ada",
       text: "@devbot fix the flaky test",
+      action: null,
     });
-  });
-
-  it("accepts camelCase aliases for reuse with alternate vendors", () => {
-    const msg = parseChatMessage({
-      messageId: 42,
-      channelId: "general",
-      senderId: "bob",
-      senderName: "Bob",
-      text: "hello",
-    });
-    assert.equal(msg.messageId, "42");
-    assert.equal(msg.threadId, null);
-    assert.equal(msg.channelId, "general");
-    assert.equal(msg.senderId, "bob");
-  });
-
-  it("trims text and falls back to message/body fields", () => {
-    const msg = parseChatMessage({
-      message_id: "m2",
-      channel_id: "c",
-      sender_id: "s",
-      message: "  padded  ",
-    });
-    assert.equal(msg.text, "padded");
   });
 
   it("throws when required ids are missing", () => {
-    assert.throws(() => parseChatMessage({ text: "no ids" }), /missing/);
+    assert.throws(() => parseChatMessage({ body: "no ids" }), /missing/);
   });
 });
