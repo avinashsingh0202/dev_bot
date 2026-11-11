@@ -50,7 +50,7 @@ Inbound mapping (`parseChatMessage()` in `src/routes/chat.ts`):
 | `channel_id` | `conversationId` |
 | `thread_id` | `parentMessageId` if present, else `messageId` (thread root) |
 
-Ignores events where `senderId === BOT_USER_ID`. Does **not** act on every message in the allowlisted conversation.
+Ignores events where `senderId === BOT_USER_ID` (when set). Does **not** act on every message in the allowlisted conversation.
 
 **New request trigger:** trimmed `body` must **start with** `@devbot` (case-insensitive), e.g. `@devbot test`. That prefix is stripped for the agent prompt. Mid-message `@devbot` does not start a request. Thread replies on an existing request still work without `@devbot` again. Typical `action`: `chatMessageSent`.
 
@@ -72,7 +72,7 @@ Ignores events where `senderId === BOT_USER_ID`. Does **not** act on every messa
 }
 ```
 
-**Outbound:** set `CHAT_POST_URL` to Isometrik's **send-message** API. `src/clients/chat.ts` keeps a stable `postMessage(channelId, threadId, text)` surface; auth/body shape still needs official send-message docs (see TODO there — do not invent secrets).
+**Outbound (optional for POC):** `CHAT_POST_URL`, `CHAT_BOT_TOKEN`, and `BOT_USER_ID` may be left empty for listen/trigger testing — `postMessage` logs and skips; requests + Cursor launches still run. When ready, set `CHAT_POST_URL` to Isometrik's **send-message** API (`src/clients/chat.ts`; auth/body docs still TODO — do not invent secrets). `CURSOR_MODEL` stays optional (Cursor default when blank).
 
 ### Cursor (agent status → DevBot)
 

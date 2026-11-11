@@ -151,7 +151,8 @@ export function isChatAllowed(
     allowedConversationIds: Set<string>;
   },
 ): boolean {
-  if (msg.senderId === config.BOT_USER_ID) return false;
+  // BOT_USER_ID optional for POC — only filter self when set
+  if (config.BOT_USER_ID && msg.senderId === config.BOT_USER_ID) return false;
   if (
     config.allowedUserIds.size > 0 &&
     !config.allowedUserIds.has(msg.senderId)
