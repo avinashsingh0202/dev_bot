@@ -52,7 +52,10 @@ async function main(): Promise<void> {
   });
 
   const server = app.listen(config.PORT, () => {
-    console.log(`[devbot] listening on :${config.PORT}`);
+    // PUBLIC_BASE_URL may be the local default — loadConfig already warns once.
+    console.log(
+      `[devbot] listening on :${config.PORT} (PUBLIC_BASE_URL=${config.PUBLIC_BASE_URL})`,
+    );
   });
 
   const shutdown = async (signal: string) => {

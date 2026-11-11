@@ -32,9 +32,40 @@ const envSchema = z.object({
   ALLOWED_USER_IDS: z.string().optional().default(""),
   /** Comma list of conversationIds; empty = allow all. POC default in .env.example. */
   ALLOWED_CONVERSATION_IDS: z.string().optional().default(""),
-  PUBLIC_BASE_URL: z.string().url(),
+  /**
+   * Optional at boot so local `npm start` works before ngrok.
+   * Empty/missing → http://localhost:3000 (Cursor/GitHub/Isometrik webhooks
+   * still need a real public HTTPS URL — see warnLocalPublicBaseUrl).
+   */
+  PUBLIC_BASE_URL: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().url().default("http://localhost:3000"),
+  ),
   MAX_CI_RETRIES: z.coerce.number().int().nonnegative().default(2),
 });
+
+/** True when PUBLIC_BASE_URL is loopback — webhooks cannot reach it. */
+export function isLocalPublicBaseUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Startup warning when PUBLIC_BASE_URL is local/default.
+ * Reuse from any entrypoint (server, scripts) after loadConfig().
+ */
+export function warnLocalPublicBaseUrl(publicBaseUrl: string): void {
+  if (!isLocalPublicBaseUrl(publicBaseUrl)) return;
+  console.warn(
+    `[devbot] PUBLIC_BASE_URL is ${publicBaseUrl} (local default). ` +
+      "Cursor, GitHub, and Isometrik webhooks need a real public HTTPS URL " +
+      "(e.g. ngrok). Set PUBLIC_BASE_URL before registering webhook endpoints.",
+  );
+}
 
 export type Config = z.infer<typeof envSchema> & {
   allowedUserIds: Set<string>;
@@ -72,6 +103,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowedConversationIds: parseIdList(data.ALLOWED_CONVERSATION_IDS),
     chatOutboundEnabled: Boolean(data.CHAT_POST_URL && data.CHAT_BOT_TOKEN),
   };
+  // Warn once when config first loads with a loopback PUBLIC_BASE_URL.
+  warnLocalPublicBaseUrl(cached.PUBLIC_BASE_URL);
   return cached;
 }
 
