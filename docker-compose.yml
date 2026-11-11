@@ -1,0 +1,22 @@
+# Local Postgres for DevBot. Reuse this compose file for local development;
+# production should point DATABASE_URL at a managed instance instead.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devbot-postgres
+    environment:
+      POSTGRES_USER: devbot
+      POSTGRES_PASSWORD: devbot
+      POSTGRES_DB: devbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - devbot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devbot -d devbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  devbot_pgdata:
