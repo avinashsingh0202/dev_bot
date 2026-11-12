@@ -7,7 +7,7 @@ Stack: **Node.js 20+**, TypeScript, Express, Postgres (`pg`), zod, `tsx`.
 ## Setup
 
 ```bash
-# 1) Start local Postgres (compose service name: postgres → localhost:5432)
+# 1) Start local Postgres (compose service name: postgres → localhost:5433)
 docker compose up -d
 
 # 2) Configure env (placeholders only in the example — fill real secrets locally)
@@ -20,7 +20,7 @@ npm test
 npm run dev
 ```
 
-`docker compose up -d` starts the `postgres` service (`devbot` / `devbot` / db `devbot` on port 5432). Match that with `DATABASE_URL=postgres://devbot:devbot@localhost:5432/devbot`.
+`docker compose up -d` starts the `postgres` service (`devbot` / `devbot` / db `devbot` on **host** port **5433**, container 5432). Match that with `DATABASE_URL=postgres://devbot:devbot@localhost:5433/devbot`. Host `:5432` is left free for other local stacks.
 
 Migrations in `migrations/` run automatically on startup.
 

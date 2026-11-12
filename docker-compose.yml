@@ -8,8 +8,10 @@ services:
       POSTGRES_USER: devbot
       POSTGRES_PASSWORD: devbot
       POSTGRES_DB: devbot
+    # Host 5433 — host :5432 is often taken (other local stacks / tunnels).
+    # Keep container port 5432; pair with DATABASE_URL ...@localhost:5433/...
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - devbot_pgdata:/var/lib/postgresql/data
     healthcheck:
