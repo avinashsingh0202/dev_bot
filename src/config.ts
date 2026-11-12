@@ -1,6 +1,10 @@
 /**
  * Central env loading. Keep all process.env reads here so adapters and
  * routes can reuse typed config without scattering validation.
+ *
+ * Production/dev boot: `src/server.ts` imports `dotenv/config` first so
+ * `.env` is on process.env before loadConfig() runs. Do not import dotenv
+ * here — tests call loadConfig(explicitEnv) and must stay side-effect free.
  */
 import { z } from "zod";
 

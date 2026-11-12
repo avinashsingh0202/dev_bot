@@ -3,7 +3,11 @@
  * - JSON parser for chat + REST
  * - Raw body for Cursor/GitHub signature verification
  * - Migrations on startup
+ *
+ * Load `.env` into process.env before loadConfig(). Config itself stays
+ * dotenv-free so tests can pass an explicit env object without side effects.
  */
+import "dotenv/config";
 import express from "express";
 import { loadConfig } from "./config.js";
 import { closePool, getRequestById, listEventsForRequest, runMigrations } from "./db.js";
