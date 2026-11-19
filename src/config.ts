@@ -51,7 +51,8 @@ const envSchema = z.object({
 /** True when PUBLIC_BASE_URL is loopback — webhooks cannot reach it. */
 export function isLocalPublicBaseUrl(url: string): boolean {
   try {
-    const host = new URL(url).hostname;
+    // WHATWG hostname keeps the brackets on IPv6, so "[::1]" is loopback too.
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
   } catch {
     return true;

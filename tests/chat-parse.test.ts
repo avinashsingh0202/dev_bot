@@ -70,4 +70,44 @@ describe("parseChatMessage (Isometrik)", () => {
   it("throws when required ids are missing", () => {
     assert.throws(() => parseChatMessage({ body: "no ids" }), /missing/);
   });
+
+  it("accepts camelCase aliases and numeric ids", () => {
+    const msg = parseChatMessage({
+      id: 42,
+      channelId: "chan",
+      user_id: 7,
+      user_name: "Bea",
+      threadId: "root",
+      message: "  hello  ",
+    });
+    assert.equal(msg.messageId, "42");
+    assert.equal(msg.channelId, "chan");
+    assert.equal(msg.senderId, "7");
+    assert.equal(msg.senderName, "Bea");
+    assert.equal(msg.threadId, "root");
+    assert.equal(msg.text, "hello");
+    assert.equal(msg.action, null);
+  });
+
+  it("defaults the sender name and rejects blank required ids", () => {
+    const msg = parseChatMessage({
+      messageId: "m",
+      conversationId: "c",
+      senderId: "s",
+      parentMessageId: null,
+    });
+    assert.equal(msg.senderName, "unknown");
+    assert.equal(msg.text, "");
+    assert.equal(msg.threadId, "m");
+    assert.throws(
+      () =>
+        parseChatMessage({
+          messageId: "",
+          conversationId: "c",
+          senderId: "s",
+          body: "x",
+        }),
+      /missing/,
+    );
+  });
 });

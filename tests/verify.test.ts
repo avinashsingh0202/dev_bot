@@ -51,4 +51,13 @@ describe("verifyGitHubSignature", () => {
     const sig = sign(SECRET, BODY).slice(0, 20);
     assert.equal(verifyGitHubSignature(BODY, sig, SECRET), false);
   });
+
+  it("accepts a string body and rejects a different-case digest", () => {
+    const raw = '{"ok":true}';
+    const sig = sign(SECRET, Buffer.from(raw));
+    assert.equal(verifyCursorSignature(raw, sig, SECRET), true);
+    assert.equal(verifyGitHubSignature(raw, sig, SECRET), true);
+    const upperHex = sig.slice(0, 7) + sig.slice(7).toUpperCase();
+    assert.equal(verifyGitHubSignature(raw, upperHex, SECRET), false);
+  });
 });

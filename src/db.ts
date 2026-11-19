@@ -72,6 +72,14 @@ export async function closePool(): Promise<void> {
   }
 }
 
+/**
+ * Test helper — install a fake pool so query tests do not open Postgres.
+ * Production code uses getPool() / closePool() only.
+ */
+export function setPoolForTests(next: pg.Pool | null): void {
+  pool = next;
+}
+
 export async function runMigrations(databaseUrl?: string): Promise<void> {
   const client = await getPool(databaseUrl).connect();
   try {

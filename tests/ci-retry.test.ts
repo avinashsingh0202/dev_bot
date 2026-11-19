@@ -68,6 +68,16 @@ describe("pull request text", () => {
     assert.equal(title.endsWith("..."), true);
   });
 
+  it("collapses whitespace and falls back when the prompt is blank", () => {
+    assert.equal(pullRequestTitle("  fix\nlogin  "), "DevBot: fix login");
+    assert.equal(pullRequestTitle("   "), "DevBot: change");
+    assert.equal(pullRequestTitle("x".repeat(72)), `DevBot: ${"x".repeat(72)}`);
+    assert.equal(
+      pullRequestTitle("x".repeat(73)),
+      `DevBot: ${"x".repeat(69)}...`,
+    );
+  });
+
   it("puts the chat prompt and agent link in the body", () => {
     const body = pullRequestBody({
       prompt: "change the app name to HOA",
@@ -78,6 +88,13 @@ describe("pull request text", () => {
     assert.match(body, /Renamed launcher labels/);
     assert.match(body, /change the app name to HOA/);
     assert.match(body, /https:\/\/cursor.com\/agents\/bc-1/);
+  });
+
+  it("omits a blank summary and agent link", () => {
+    assert.equal(
+      pullRequestBody({ prompt: "  ", summary: "  ", agentUrl: " " }),
+      "Opened by DevBot.\n\nRequested in chat: (empty)",
+    );
   });
 });
 
@@ -95,5 +112,11 @@ describe("lastLines", () => {
 
   it("returns the full text when shorter than the limit", () => {
     assert.equal(lastLines("a\nb\nc", 150), "a\nb\nc");
+  });
+
+  it("normalizes CRLF and keeps a short log intact", () => {
+    assert.equal(lastLines("a\r\nb\r\nc", 2), "b\nc");
+    assert.equal(lastLines("a\nb", 2), "a\nb");
+    assert.equal(lastLines("", 5), "");
   });
 });
