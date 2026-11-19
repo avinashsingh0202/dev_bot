@@ -143,6 +143,170 @@ export function stripDevbotPrefix(text: string): string {
   return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
+/**
+ * Reply for a mention that has no engineering task.
+ * Must not be "On it" — that ack is only for a real dispatch.
+ */
+export const DEVBOT_NEEDS_TASK_REPLY =
+  "Send a task after @devbot. Example: @devbot fix the flaky login test";
+
+export type DevbotDispatch =
+  | { kind: "clarify"; reply: string }
+  | { kind: "dispatch"; prompt: string; forceNew: boolean };
+
+/**
+ * Words that never make a message an engineering task by themselves.
+ * "test" is absent on purpose: `@devbot test` is a real request.
+ * Imperatives (fix, add, check, look) are absent so a short task still dispatches.
+ */
+const CONVERSATIONAL_FILLER = new Set([
+  "hi",
+  "hii",
+  "hello",
+  "hey",
+  "heya",
+  "hiya",
+  "yo",
+  "sup",
+  "howdy",
+  "hola",
+  "hai",
+  "good",
+  "morning",
+  "afternoon",
+  "evening",
+  "night",
+  "gm",
+  "gn",
+  "thanks",
+  "thank",
+  "thx",
+  "ty",
+  "tysm",
+  "yw",
+  "np",
+  "welcome",
+  "cheers",
+  "ok",
+  "okay",
+  "k",
+  "kk",
+  "cool",
+  "nice",
+  "great",
+  "awesome",
+  "perfect",
+  "sure",
+  "yes",
+  "no",
+  "yep",
+  "nope",
+  "yeah",
+  "nah",
+  "yea",
+  "y",
+  "bye",
+  "goodbye",
+  "cya",
+  "later",
+  "sorry",
+  "ping",
+  "lol",
+  "lmao",
+  "haha",
+  "hehe",
+  "wow",
+  "omg",
+  "hmm",
+  "hm",
+  "uh",
+  "um",
+  "help",
+  "please",
+  "pls",
+  "plz",
+  "what",
+  "whats",
+  "how",
+  "who",
+  "are",
+  "you",
+  "u",
+  "ya",
+  "up",
+  "doing",
+  "there",
+  "can",
+  "could",
+  "would",
+  "will",
+  "i",
+  "im",
+  "me",
+  "my",
+  "we",
+  "our",
+  "a",
+  "an",
+  "the",
+  "to",
+  "for",
+  "and",
+  "or",
+  "of",
+  "just",
+  "so",
+  "it",
+  "its",
+  "this",
+  "that",
+  "do",
+  "does",
+  "did",
+  "bot",
+  "devbot",
+  "team",
+  "everyone",
+  "folks",
+  "guys",
+  "all",
+]);
+
+/**
+ * `@devbot` plus surrounding whitespace or punctuation, and no task text.
+ * `@devbot!`, `@devbot?`, and `@devbot...` count. `@devbot fix login` does not.
+ */
+export function isBareDevbotMention(text: string): boolean {
+  if (!startsWithDevbotMention(text)) return false;
+  return !/[a-z0-9]/i.test(stripDevbotPrefix(text));
+}
+
+/** Task words left after dropping greetings, thanks, and other chatter. */
+function hasActionableTask(prompt: string): boolean {
+  const tokens = prompt
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 0 && !CONVERSATIONAL_FILLER.has(token));
+  return tokens.length > 0;
+}
+
+/**
+ * Bare mentions and conversational filler do not start work.
+ * Anything with a task word still dispatches, including `@devbot test`
+ * and `@devbot new <task>`. Callers must not create a request or launch
+ * when the result is `clarify`.
+ */
+export function classifyDevbotRequest(text: string): DevbotDispatch {
+  const rawPrompt = stripDevbotPrefix(text);
+  const forceNew = wantsFreshAgent(rawPrompt);
+  const prompt = forceNew ? stripFreshAgentPrefix(rawPrompt) : rawPrompt;
+  if (!hasActionableTask(prompt)) {
+    return { kind: "clarify", reply: DEVBOT_NEEDS_TASK_REPLY };
+  }
+  return { kind: "dispatch", prompt, forceNew };
+}
+
 function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -263,13 +427,16 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
   // New request only when trimmed body starts with @devbot (not every allowlisted msg)
   if (!startsWithDevbotMention(msg.text)) return;
 
-  const rawPrompt = stripDevbotPrefix(msg.text) || msg.text;
+  // Bare @devbot and greetings ask for a task. No request row, no "On it", no launch.
+  const decision = classifyDevbotRequest(msg.text);
+  if (decision.kind === "clarify") {
+    await postMessage(msg.channelId, msg.threadId, decision.reply);
+    return;
+  }
+
   // `@devbot new …` always starts a fresh agent. Anything else that matches
   // an open bug is a follow-up on that agent (see src/related.ts).
-  const forceNew = wantsFreshAgent(rawPrompt);
-  const prompt = forceNew
-    ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
-    : rawPrompt;
+  const { prompt, forceNew } = decision;
   const threadId = msg.threadId;
 
   if (!forceNew) {
