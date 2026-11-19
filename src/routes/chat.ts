@@ -143,6 +143,57 @@ export function stripDevbotPrefix(text: string): string {
   return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
+/**
+ * Posted when the message is only an @devbot mention. Not "On it" —
+ * that reply is reserved for a request that will actually launch.
+ */
+export const NO_TASK_REPLY =
+  "No task to run. Mention @devbot followed by what you want done.";
+
+const INVISIBLE = /[\u200b\u200c\u200d\ufeff]/g;
+/** Leftover mention decoration, not a task. */
+const PUNCT_ONLY = /^[\s.,!?;:'"`*_~()[\]{}<>\-–—/\\|]+$/;
+
+export type DevbotRequestDecision =
+  | { action: "ignore" }
+  | { action: "no_task"; reply: string }
+  | { action: "dispatch"; prompt: string; forceNew: boolean };
+
+/**
+ * New-request gate. A leading @devbot with no task must not launch:
+ * whitespace, case, zero-width characters, a repeated mention, trailing
+ * punctuation, or a bare `new` with nothing after it. Mid-message mentions
+ * stay ignored (no reply). A real task still dispatches, including
+ * `@devbot new <task>` as a fresh agent.
+ */
+export function resolveDevbotRequest(text: string): DevbotRequestDecision {
+  const trimmed = text.replace(INVISIBLE, "").trim();
+  if (!startsWithDevbotMention(trimmed)) return { action: "ignore" };
+
+  const rawPrompt = stripDevbotPrefix(trimmed);
+  if (!hasTaskText(rawPrompt)) {
+    return { action: "no_task", reply: NO_TASK_REPLY };
+  }
+
+  const forceNew = wantsFreshAgent(rawPrompt);
+  const prompt = forceNew ? stripFreshAgentPrefix(rawPrompt) : rawPrompt;
+  if (!hasTaskText(prompt)) {
+    return { action: "no_task", reply: NO_TASK_REPLY };
+  }
+
+  return { action: "dispatch", prompt: prompt.trim(), forceNew };
+}
+
+/** False when the remainder is only mentions, whitespace, or punctuation. */
+function hasTaskText(text: string): boolean {
+  let rest = text.replace(INVISIBLE, "").trim();
+  while (/^@devbot\b/i.test(rest)) {
+    rest = rest.replace(/^@devbot\b/i, "").replace(INVISIBLE, "").trim();
+  }
+  if (!rest || PUNCT_ONLY.test(rest)) return false;
+  return true;
+}
+
 function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -260,16 +311,18 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     }
   }
 
-  // New request only when trimmed body starts with @devbot (not every allowlisted msg)
-  if (!startsWithDevbotMention(msg.text)) return;
+  // New request only when trimmed body starts with @devbot (not every allowlisted msg).
+  // Mention-only text is not a task: reply and return before create/launch.
+  const invocation = resolveDevbotRequest(msg.text);
+  if (invocation.action === "ignore") return;
+  if (invocation.action === "no_task") {
+    await postMessage(msg.channelId, msg.threadId, invocation.reply);
+    return;
+  }
 
-  const rawPrompt = stripDevbotPrefix(msg.text) || msg.text;
   // `@devbot new …` always starts a fresh agent. Anything else that matches
   // an open bug is a follow-up on that agent (see src/related.ts).
-  const forceNew = wantsFreshAgent(rawPrompt);
-  const prompt = forceNew
-    ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
-    : rawPrompt;
+  const { prompt, forceNew } = invocation;
   const threadId = msg.threadId;
 
   if (!forceNew) {
