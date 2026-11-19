@@ -60,4 +60,46 @@ describe("isChatAllowed (POC allowlists)", () => {
       true,
     );
   });
+
+  it("does not filter self-messages when BOT_USER_ID is empty", () => {
+    const open = {
+      BOT_USER_ID: "",
+      allowedUserIds: new Set<string>(),
+      allowedConversationIds: new Set<string>(),
+    };
+    assert.equal(
+      isChatAllowed({ senderId: "devbot", channelId: POC_CONV }, open),
+      true,
+    );
+  });
+
+  it("checks only the dimensions that are configured", () => {
+    const usersOnly = {
+      BOT_USER_ID: "",
+      allowedUserIds: new Set([POC_USER]),
+      allowedConversationIds: new Set<string>(),
+    };
+    assert.equal(
+      isChatAllowed({ senderId: POC_USER, channelId: "anywhere" }, usersOnly),
+      true,
+    );
+    assert.equal(
+      isChatAllowed({ senderId: "nope", channelId: "anywhere" }, usersOnly),
+      false,
+    );
+
+    const convOnly = {
+      BOT_USER_ID: "",
+      allowedUserIds: new Set<string>(),
+      allowedConversationIds: new Set([POC_CONV]),
+    };
+    assert.equal(
+      isChatAllowed({ senderId: "anyone", channelId: POC_CONV }, convOnly),
+      true,
+    );
+    assert.equal(
+      isChatAllowed({ senderId: "anyone", channelId: "nope" }, convOnly),
+      false,
+    );
+  });
 });

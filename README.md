@@ -136,5 +136,14 @@ Thread commands (reply with `parentMessageId` = root `messageId`; no `@devbot` n
 |--------|------|
 | `npm run dev` | Watch mode via `tsx` |
 | `npm start` | Run once |
-| `npm test` | Unit tests (signatures, chat parse, CI retry) |
+| `npm test` | Hermetic unit and HTTP tests (no Postgres or live APIs) |
 | `npm run typecheck` | `tsc --noEmit` |
+
+## Tests
+
+```bash
+npm test
+npm run typecheck
+```
+
+`npm test` uses Node's built-in test runner through `tsx`. Postgres, Cursor, GitHub, and outbound chat are mocked, so the suite does not need Docker, API keys, or network access. `npm test` works before `docker compose up`.

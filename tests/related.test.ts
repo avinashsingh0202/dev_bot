@@ -52,8 +52,9 @@ describe("pickRelatedRequest", () => {
     updated_at: new Date("2026-11-03T00:00:00Z"),
   });
 
-  it("returns null when nothing is open", () => {
+  it("returns null when nothing is open or the report is blank", () => {
     assert.equal(pickRelatedRequest("login button broken", []), null);
+    assert.equal(pickRelatedRequest("   ", [login]), null);
   });
 
   it("matches an explicit branch, PR, or id", () => {
@@ -71,6 +72,28 @@ describe("pickRelatedRequest", () => {
       pickRelatedRequest("request 22222222 is the one", [login, signup])?.id,
       signup.id,
     );
+    assert.equal(pickRelatedRequest("see #12", [login, signup])?.id, login.id);
+    assert.equal(
+      pickRelatedRequest("pull/12 failed", [login, signup])?.id,
+      login.id,
+    );
+  });
+
+  it("picks the newest request when the text names more than one", () => {
+    const match = pickRelatedRequest(
+      "see devbot/11111111 and devbot/22222222",
+      [login, signup],
+    );
+    assert.equal(match?.id, signup.id);
+    assert.equal(match?.reason, "explicit");
+  });
+
+  it("does not treat a short id as an explicit link", () => {
+    const tiny = candidate({
+      id: "short",
+      prompt: "completely different words here",
+    });
+    assert.equal(pickRelatedRequest("short", [tiny]), null);
   });
 
   it("does not treat a shorter branch as a prefix of a longer one", () => {
@@ -164,8 +187,13 @@ describe("followup delivery helpers", () => {
 
   it("recognises a retired agent separately from a busy one", () => {
     assert.equal(isRetiredAgentError("Cursor followup failed: 404 Not Found"), true);
+    assert.equal(isRetiredAgentError("Cursor followup failed: 410 Gone"), true);
+    assert.equal(isRetiredAgentError("agent expired"), true);
     assert.equal(isRetiredAgentError("Cursor followup failed: 400 branch not found"), false);
     assert.equal(isAgentBusyError("Cursor followup failed: 409 currently running"), true);
+    assert.equal(isAgentBusyError("429 Too Many Requests"), true);
+    assert.equal(isAgentBusyError("agent is in progress"), true);
+    assert.equal(isAgentBusyError("busy"), true);
     assert.equal(isAgentBusyError("Cursor followup failed: 500"), false);
   });
 
@@ -180,5 +208,14 @@ describe("followup delivery helpers", () => {
     assert.match(prompt, /devbot\/11111111/);
     assert.match(prompt, /Ada: login button still broken on mobile/);
     assert.match(prompt, /Grace: same button fails after refresh/);
+  });
+
+  it("stays on the current branch when the request has none yet", () => {
+    const prompt = buildRelatedFollowupPrompt({
+      branch: null,
+      reports: [{ senderName: "Ada", text: "still broken" }],
+    });
+    assert.match(prompt, /Stay on the current branch/);
+    assert.match(prompt, /Ada: still broken/);
   });
 });
