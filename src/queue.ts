@@ -2,6 +2,9 @@
  * Simple in-process queue: at most MAX_RUNNING agents at once.
  * Queued items post "Queued" then launch when a slot frees.
  * Reusable for Phase 2 if board-triggered launches share the same cap.
+ *
+ * This module only starts a new agent. A bug that matches an open request
+ * must go through src/followup.ts (same agent, no second launch).
  */
 import {
   countRunningAgents,

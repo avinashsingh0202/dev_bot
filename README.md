@@ -56,6 +56,8 @@ Ignores events where `senderId === BOT_USER_ID` (when set). Does **not** act on 
 
 **New request trigger:** trimmed `body` must **start with** `@devbot` (case-insensitive), e.g. `@devbot test`. That prefix is stripped for the agent prompt. Mid-message `@devbot` does not start a request. Thread replies on an existing request still work without `@devbot` again. Typical `action`: `chatMessageSent`.
 
+**Related bug (same agent):** a new `@devbot` report in that conversation is sent to an open agent when it names that agent's branch or PR, shares enough distinctive words with the open report, or says "same bug" / "still broken" while only one request is open. That is a Cursor follow-up on the same branch, which avoids a second agent launch. `@devbot new …` always starts a fresh agent. If the matched agent is still running, the report waits and is sent once when that run finishes.
+
 **POC allowlists** (env, comma-separated; empty = allow all for that dimension). Non-matches are ignored with **no reply**:
 
 | Env | POC default |
@@ -79,6 +81,8 @@ Ignores events where `senderId === BOT_USER_ID` (when set). Does **not** act on 
 ### Cursor (agent status → DevBot)
 
 Configured automatically when DevBot launches an agent (`webhook.url` + `webhook.secret` = `CURSOR_WEBHOOK_SECRET`). Header: `X-Webhook-Signature`.
+
+Launch sets `autoCreatePr: true`. If the FINISHED webhook includes `target.prUrl`, that URL is stored. If it includes a branch and no PR URL, DevBot opens the pull request itself (`ensurePullRequest()` in `src/clients/github.ts`) against `DEFAULT_REF`. A finish with no branch stays a clarification — the agent made no commit.
 
 ### GitHub (PR + workflow_run → DevBot)
 
@@ -120,8 +124,10 @@ Thread commands (reply with `parentMessageId` = root `messageId`; no `@devbot` n
 
 - **Chat vendor (Isometrik)**: inbound = `parseChatMessage()`; outbound = `src/clients/chat.ts` (`postMessage`). Mapping note: project `internal/isometrik-chat-mapping.md`.
 - **CI retry policy**: pure helper `decideCiRetry()` in `src/clients/github.ts` (unit-tested).
+- **PR after a Cursor finish**: `planFinishedPullRequest()` decides record / open / clarify (unit-tested). `ensurePullRequest()` is the GitHub call — reuse it anywhere a `devbot/…` branch needs one open PR; it returns an existing open PR for that head instead of creating a second one. Needs pull-request write on `GITHUB_TOKEN`.
 - **Signature helpers**: `src/verify.ts` shared by Cursor + GitHub.
-- **Agent concurrency**: `src/queue.ts` caps at 3 running agents; extras get "Queued".
+- **Agent concurrency**: `src/queue.ts` caps at 3 running agents; extras get "Queued". `src/queue.ts` only launches a new agent.
+- **Same agent for a related bug**: `pickRelatedRequest()` in `src/related.ts` (unit-tested; tune `MIN_SHARED_TOKENS` and `MIN_OVERLAP_SCORE` there). Delivery is `routeRelatedReport()` / `flushPendingFollowups()` in `src/followup.ts` — one follow-up for every report that was waiting. Extra chat threads are stored in `request_threads` and resolved by `findRequestByThread()`; keep using that helper. `@devbot new …` skips the match and launches.
 - **Phase 2 board**: `requests.board_card_id` and `/requests/:id/timeline` are ready.
 
 ## Scripts

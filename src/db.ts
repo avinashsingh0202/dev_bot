@@ -158,18 +158,119 @@ export async function getRequestById(id: string): Promise<RequestRow | null> {
   return result.rows[0] ?? null;
 }
 
+/**
+ * Request for this chat thread: the row that owns the thread, or a related
+ * report linked in request_threads (same agent, no second launch).
+ * Keep using this helper — do not query request_threads from routes.
+ */
 export async function findRequestByThread(
   channelId: string,
   threadId: string,
 ): Promise<RequestRow | null> {
   const result = await getPool().query<RequestRow>(
-    `SELECT * FROM requests
-     WHERE chat_channel = $1 AND chat_thread = $2
-     ORDER BY created_at DESC
+    `SELECT r.* FROM requests r
+     WHERE (r.chat_channel = $1 AND r.chat_thread = $2)
+        OR r.id IN (
+          SELECT request_id FROM request_threads
+          WHERE chat_channel = $1 AND chat_thread = $2
+        )
+     ORDER BY r.created_at DESC
      LIMIT 1`,
     [channelId, threadId],
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * Open requests in this conversation that still have an agent.
+ * Pass REUSABLE_AGENT_STATUSES from src/related.ts — that list is the
+ * policy for which bugs can share an agent. This query stays generic so
+ * other callers can reuse it with a different status set.
+ */
+export async function listReusableRequests(input: {
+  chatChannel: string;
+  repo: string;
+  since: Date;
+  statuses: readonly string[];
+}): Promise<RequestRow[]> {
+  const result = await getPool().query<RequestRow>(
+    `SELECT * FROM requests
+     WHERE chat_channel = $1
+       AND repo = $2
+       AND agent_id IS NOT NULL
+       AND status = ANY($3::text[])
+       AND updated_at >= $4
+     ORDER BY updated_at DESC
+     LIMIT 20`,
+    [input.chatChannel, input.repo, [...input.statuses], input.since],
+  );
+  return result.rows;
+}
+
+/**
+ * Remember that a later chat thread is the same bug as an existing request.
+ * Later replies in that thread then hit findRequestByThread() and the same agent.
+ */
+export async function linkRequestThread(input: {
+  chatChannel: string;
+  chatThread: string;
+  requestId: string;
+}): Promise<void> {
+  await getPool().query(
+    `INSERT INTO request_threads (chat_channel, chat_thread, request_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (chat_channel, chat_thread) DO NOTHING`,
+    [input.chatChannel, input.chatThread, input.requestId],
+  );
+}
+
+export interface PendingFollowup {
+  id: string;
+  sender_name: string;
+  text: string;
+}
+
+/** Hold a related report until the agent is free. Flushed by src/followup.ts. */
+export async function enqueuePendingFollowup(input: {
+  requestId: string;
+  senderName: string;
+  text: string;
+}): Promise<void> {
+  await getPool().query(
+    `INSERT INTO pending_followups (request_id, sender_name, text)
+     VALUES ($1, $2, $3)`,
+    [input.requestId, input.senderName, input.text],
+  );
+}
+
+/**
+ * Take every queued related report for this request, oldest first.
+ * Caller sends them as one follow-up. On a transient failure, enqueue them again.
+ */
+export async function takePendingFollowups(
+  requestId: string,
+): Promise<PendingFollowup[]> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<{
+      id: string;
+      sender_name: string;
+      text: string;
+    }>(
+      `DELETE FROM pending_followups
+       WHERE request_id = $1
+       RETURNING id::text, sender_name, text`,
+      [requestId],
+    );
+    await client.query("COMMIT");
+    return result.rows.sort((a, b) => Number(a.id) - Number(b.id));
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function findRequestByBranch(

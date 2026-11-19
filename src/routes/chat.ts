@@ -10,12 +10,21 @@ import { loadConfig } from "../config.js";
 import {
   createRequest,
   findRequestByThread,
+  listReusableRequests,
   logEvent,
   updateRequest,
 } from "../db.js";
 import { postMessage } from "../clients/chat.js";
 import { sendFollowup } from "../clients/cursor.js";
+import { routeRelatedReport } from "../followup.js";
 import { enqueueOrLaunch } from "../queue.js";
+import {
+  pickRelatedRequest,
+  RELATED_LOOKBACK_MS,
+  REUSABLE_AGENT_STATUSES,
+  stripFreshAgentPrefix,
+  wantsFreshAgent,
+} from "../related.js";
 
 export interface ParsedChatMessage {
   messageId: string;
@@ -254,8 +263,45 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
   // New request only when trimmed body starts with @devbot (not every allowlisted msg)
   if (!startsWithDevbotMention(msg.text)) return;
 
-  const prompt = stripDevbotPrefix(msg.text) || msg.text;
+  const rawPrompt = stripDevbotPrefix(msg.text) || msg.text;
+  // `@devbot new …` always starts a fresh agent. Anything else that matches
+  // an open bug is a follow-up on that agent (see src/related.ts).
+  const forceNew = wantsFreshAgent(rawPrompt);
+  const prompt = forceNew
+    ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
+    : rawPrompt;
   const threadId = msg.threadId;
+
+  if (!forceNew) {
+    const open = await listReusableRequests({
+      chatChannel: msg.channelId,
+      repo: config.DEFAULT_REPO,
+      since: new Date(Date.now() - RELATED_LOOKBACK_MS),
+      statuses: REUSABLE_AGENT_STATUSES,
+    });
+    const match = pickRelatedRequest(prompt, open);
+    const existing = match ? open.find((row) => row.id === match.id) : undefined;
+    if (match && existing) {
+      try {
+        const outcome = await routeRelatedReport({
+          request: existing,
+          senderName: msg.senderName,
+          text: prompt,
+          replyChannel: msg.channelId,
+          replyThread: threadId,
+          reason: match.reason,
+        });
+        // A retired agent cannot take the follow-up; fall through and launch.
+        if (outcome !== "agent_gone") return;
+      } catch (err) {
+        console.error(
+          "[chat] related follow-up failed, starting a new agent",
+          err,
+        );
+      }
+    }
+  }
+
   const request = await createRequest({
     chatChannel: msg.channelId,
     chatThread: threadId,

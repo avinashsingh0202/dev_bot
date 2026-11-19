@@ -10,7 +10,14 @@ import {
   updateRequest,
 } from "../db.js";
 import { postMessage } from "../clients/chat.js";
+import {
+  ensurePullRequest,
+  planFinishedPullRequest,
+  pullRequestBody,
+  pullRequestTitle,
+} from "../clients/github.js";
 import { verifyCursorSignature } from "../verify.js";
+import { flushPendingFollowups } from "../followup.js";
 import { drainQueue } from "../queue.js";
 
 interface CursorWebhookBody {
@@ -50,15 +57,84 @@ async function handleStatusChange(body: CursorWebhookBody): Promise<void> {
   const status = (body.status ?? "").toUpperCase();
 
   if (status === "FINISHED") {
-    const prUrl = body.target?.prUrl ?? null;
-    const summary = body.summary?.trim() || "(no summary)";
+    const summary = body.summary?.trim() || "";
+    const branch = body.target?.branchName ?? request.branch ?? "";
+    // Cursor launch sets autoCreatePr, but a FINISHED webhook can still omit
+    // prUrl after the branch was pushed. planFinishedPullRequest picks
+    // record vs open vs clarify; ensurePullRequest is the open fallback.
+    const plan = planFinishedPullRequest({
+      prUrl: body.target?.prUrl,
+      branchName: branch,
+    });
+
+    let prUrl = plan.action === "record_pr" ? plan.prUrl : "";
+    let prNumber: number | null = null;
+
+    if (plan.action === "open_pr") {
+      try {
+        const opened = await ensurePullRequest({
+          head: plan.branch,
+          base: loadConfig().DEFAULT_REF,
+          title: pullRequestTitle(request.prompt),
+          body: pullRequestBody({
+            prompt: request.prompt,
+            summary,
+            agentUrl: body.target?.url,
+          }),
+        });
+        if (opened.ok) {
+          prUrl = opened.htmlUrl;
+          prNumber = opened.number;
+          console.log(
+            `[cursor] ${opened.created ? "opened" : "found"} PR ${prUrl}`,
+          );
+        } else if (opened.reason === "github_error") {
+          await updateRequest(request.id, {
+            status: "agent_error",
+            branch: branch || request.branch,
+          });
+          const msg = `Agent finished on ${plan.branch} but opening the PR failed: ${opened.detail}`;
+          await postMessage(request.chat_channel, request.chat_thread, msg);
+          await logEvent({
+            requestId: request.id,
+            type: "agent_error",
+            source: "cursor",
+            summary: msg,
+            payload: body,
+          });
+          await releaseAgent(request);
+          return;
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await updateRequest(request.id, {
+          status: "agent_error",
+          branch: branch || request.branch,
+        });
+        const msg = `Agent finished on ${plan.branch} but opening the PR failed: ${detail}`;
+        await postMessage(request.chat_channel, request.chat_thread, msg);
+        await logEvent({
+          requestId: request.id,
+          type: "agent_error",
+          source: "cursor",
+          summary: msg,
+          payload: body,
+        });
+        await releaseAgent(request);
+        return;
+      }
+    }
 
     if (prUrl) {
       await updateRequest(request.id, {
         status: "pr_open",
         pr_url: prUrl,
+        ...(prNumber != null ? { pr_number: prNumber } : {}),
+        ...(branch ? { branch } : {}),
       });
-      const msg = `PR opened: ${prUrl}\nSummary: ${summary}`;
+      const msg = summary
+        ? `PR opened: ${prUrl}\nSummary: ${summary}`
+        : `PR opened: ${prUrl}`;
       await postMessage(request.chat_channel, request.chat_thread, msg);
       await logEvent({
         requestId: request.id,
@@ -68,8 +144,9 @@ async function handleStatusChange(body: CursorWebhookBody): Promise<void> {
         payload: body,
       });
     } else {
+      // FINISHED with no branch, or a branch that has no commits against base.
       await updateRequest(request.id, { status: "agent_error" });
-      const msg = `${summary}\nPlease clarify what you need — reply in this thread.`;
+      const msg = `${summary || "(no summary)"}\nPlease clarify what you need — reply in this thread.`;
       await postMessage(request.chat_channel, request.chat_thread, msg);
       await logEvent({
         requestId: request.id,
@@ -79,7 +156,7 @@ async function handleStatusChange(body: CursorWebhookBody): Promise<void> {
         payload: body,
       });
     }
-    await drainQueue();
+    await releaseAgent(request);
     return;
   }
 
@@ -95,8 +172,19 @@ async function handleStatusChange(body: CursorWebhookBody): Promise<void> {
       summary: msg,
       payload: body,
     });
-    await drainQueue();
+    await releaseAgent(request);
   }
+}
+
+/**
+ * Related reports that arrived while this agent was busy stay on it
+ * (one follow-up). Then let the launch queue fill a free slot.
+ */
+async function releaseAgent(
+  request: Parameters<typeof flushPendingFollowups>[0],
+): Promise<void> {
+  await flushPendingFollowups(request);
+  await drainQueue();
 }
 
 export function createCursorRouter(): Router {

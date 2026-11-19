@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { decideCiRetry, lastLines } from "../src/clients/github.js";
+import {
+  decideCiRetry,
+  lastLines,
+  planFinishedPullRequest,
+  pullRequestBody,
+  pullRequestTitle,
+} from "../src/clients/github.js";
 
 describe("decideCiRetry", () => {
   it("retries while attempts are below max", () => {
@@ -26,6 +32,52 @@ describe("decideCiRetry", () => {
       shouldRetry: false,
       nextAttempts: 1,
     });
+  });
+});
+
+describe("planFinishedPullRequest", () => {
+  it("keeps a PR URL Cursor already returned", () => {
+    assert.deepEqual(
+      planFinishedPullRequest({
+        prUrl: "https://github.com/org/repo/pull/4",
+        branchName: "devbot/abc",
+      }),
+      { action: "record_pr", prUrl: "https://github.com/org/repo/pull/4" },
+    );
+  });
+
+  it("opens a PR when the branch exists and Cursor omitted prUrl", () => {
+    assert.deepEqual(
+      planFinishedPullRequest({ prUrl: "  ", branchName: "devbot/abc" }),
+      { action: "open_pr", branch: "devbot/abc" },
+    );
+  });
+
+  it("asks for clarification when the agent finished with no branch", () => {
+    assert.deepEqual(planFinishedPullRequest({ prUrl: null, branchName: "" }), {
+      action: "clarify",
+    });
+  });
+});
+
+describe("pull request text", () => {
+  it("clips a long chat prompt into a title", () => {
+    const title = pullRequestTitle("x".repeat(80));
+    assert.equal(title.startsWith("DevBot: "), true);
+    assert.equal(title.length, "DevBot: ".length + 72);
+    assert.equal(title.endsWith("..."), true);
+  });
+
+  it("puts the chat prompt and agent link in the body", () => {
+    const body = pullRequestBody({
+      prompt: "change the app name to HOA",
+      summary: "Renamed launcher labels.",
+      agentUrl: "https://cursor.com/agents/bc-1",
+    });
+    assert.match(body, /Opened by DevBot/);
+    assert.match(body, /Renamed launcher labels/);
+    assert.match(body, /change the app name to HOA/);
+    assert.match(body, /https:\/\/cursor.com\/agents\/bc-1/);
   });
 });
 

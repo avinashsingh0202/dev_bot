@@ -77,6 +77,12 @@ export async function launchAgent(
   return (await res.json()) as LaunchAgentResult;
 }
 
+/**
+ * Resume an existing agent. Prefer this over launchAgent when the bug is
+ * the same one that agent already has — see src/followup.ts, which is the
+ * single caller for related reports (it also batches queued ones).
+ * Thread replies and CI retries call this directly on a known agent id.
+ */
 export async function sendFollowup(
   agentId: string,
   text: string,
