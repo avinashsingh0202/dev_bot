@@ -54,7 +54,7 @@ Inbound mapping (`parseChatMessage()` in `src/routes/chat.ts`):
 
 Ignores events where `senderId === BOT_USER_ID` (when set). Does **not** act on every message in the allowlisted conversation.
 
-**New request trigger:** trimmed `body` must **start with** `@devbot` (case-insensitive), e.g. `@devbot test`. That prefix is stripped for the agent prompt. Mid-message `@devbot` does not start a request. Thread replies on an existing request still work without `@devbot` again. Typical `action`: `chatMessageSent`.
+**New request trigger:** trimmed `body` must **start with** `@devbot` (case-insensitive), e.g. `@devbot test`. That prefix is stripped for the agent prompt. Mid-message `@devbot` does not start a request. A mention with no task (`@devbot` alone, any case, surrounding whitespace, or only punctuation after it) gets "No task to run…" and does not create a request or launch an agent. Thread replies on an existing request still work without `@devbot` again. Typical `action`: `chatMessageSent`.
 
 **Related bug (same agent):** a new `@devbot` report in that conversation is sent to an open agent when it names that agent's branch or PR, shares enough distinctive words with the open report, or says "same bug" / "still broken" while only one request is open. That is a Cursor follow-up on the same branch, which avoids a second agent launch. `@devbot new …` always starts a fresh agent. If the matched agent is still running, the report waits and is sent once when that run finishes.
 
