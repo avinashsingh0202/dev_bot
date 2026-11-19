@@ -143,6 +143,18 @@ export function stripDevbotPrefix(text: string): string {
   return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
+/**
+ * True when a leading `@devbot` has no request left after the mention and
+ * insignificant whitespace or punctuation are removed.
+ * `@devbot`, `  @DevBot  `, and `@devbot!` are not engineering requests.
+ * Callers must skip work creation and agent launch for these.
+ */
+export function isMentionOnly(text: string): boolean {
+  if (!startsWithDevbotMention(text)) return false;
+  const withoutMentions = text.replace(/@devbot\b/gi, "");
+  return withoutMentions.replace(/[\s\p{P}]+/gu, "").length === 0;
+}
+
 function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -243,6 +255,9 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
         return;
       }
 
+      // Same mention-only no-op inside an existing thread: do not follow up.
+      if (isMentionOnly(msg.text)) return;
+
       if (existing.agent_id) {
         await sendFollowup(
           existing.agent_id,
@@ -260,10 +275,13 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     }
   }
 
-  // New request only when trimmed body starts with @devbot (not every allowlisted msg)
-  if (!startsWithDevbotMention(msg.text)) return;
+  // New request only when trimmed body starts with @devbot (not every allowlisted msg).
+  // Mention-only ("@devbot", "@devbot!") is the same silent no-op: no "On it",
+  // no request row, no agent. A real task keeps the stripped prompt unchanged.
+  if (!startsWithDevbotMention(msg.text) || isMentionOnly(msg.text)) return;
 
-  const rawPrompt = stripDevbotPrefix(msg.text) || msg.text;
+  const rawPrompt = stripDevbotPrefix(msg.text);
+  if (!rawPrompt) return;
   // `@devbot new …` always starts a fresh agent. Anything else that matches
   // an open bug is a follow-up on that agent (see src/related.ts).
   const forceNew = wantsFreshAgent(rawPrompt);
