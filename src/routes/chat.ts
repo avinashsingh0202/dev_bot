@@ -143,6 +143,59 @@ export function stripDevbotPrefix(text: string): string {
   return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
+/**
+ * Task words left after removing supported `@devbot` mentions, whitespace,
+ * and mention-only syntax (punctuation or other non-word residue such as
+ * `@devbot.`, `@devbot!`, or a stack of mentions). Empty means there is no
+ * engineering request. Classification only — `prepareNewRequest` still stores
+ * the leading-prefix strip, so a later `@devbot` stays in the task text.
+ */
+export function normalizeRequestContent(text: string): string {
+  return text
+    .replace(/@devbot\b/gi, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+export interface PreparedRequest {
+  /** Text after the leading mention, before the fresh-agent prefix. */
+  rawPrompt: string;
+  /** Prompt stored on the request and sent to the agent. */
+  prompt: string;
+  forceNew: boolean;
+}
+
+/**
+ * New-request dispatch plan. Null is the existing silent no-op: the message
+ * does not start with `@devbot`, or nothing actionable remains after mentions,
+ * whitespace, and mention-only syntax are removed. A real task keeps the
+ * leading-prefix strip, including a later `@devbot` inside the task text.
+ */
+export function prepareNewRequest(text: string): PreparedRequest | null {
+  if (!startsWithDevbotMention(text)) return null;
+  const rawPrompt = stripDevbotPrefix(text);
+  if (!normalizeRequestContent(rawPrompt)) return null;
+
+  const forceNew = wantsFreshAgent(rawPrompt);
+  const stripped = forceNew ? stripFreshAgentPrefix(rawPrompt) : rawPrompt;
+  // `@devbot new` with no further task falls back to the raw prompt, matching
+  // the previous fresh-agent path. A result that is only another mention
+  // (for example `@devbot new @devbot`) is not a request.
+  const prompt = stripped || rawPrompt;
+  if (!normalizeRequestContent(prompt)) return null;
+
+  return { rawPrompt, prompt, forceNew };
+}
+
+/**
+ * Bare `@devbot` (any case, stacked mentions, whitespace, or leftover
+ * mention punctuation). Thread replies use this so a ping is not forwarded
+ * to Cursor; a reply that never mentioned the bot is unchanged.
+ */
+export function isMentionOnly(text: string): boolean {
+  return startsWithDevbotMention(text) && prepareNewRequest(text) == null;
+}
+
 function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -244,6 +297,9 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
       }
 
       if (existing.agent_id) {
+        // `@devbot` alone is not a follow-up. Same silent no-op as a new
+        // mention-only message: no Cursor call and no acknowledgement.
+        if (isMentionOnly(msg.text)) return;
         await sendFollowup(
           existing.agent_id,
           `${msg.senderName} says: ${msg.text}`,
@@ -260,16 +316,15 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     }
   }
 
-  // New request only when trimmed body starts with @devbot (not every allowlisted msg)
-  if (!startsWithDevbotMention(msg.text)) return;
+  // Mention-only (@devbot, whitespace, stacked mentions, leftover punctuation)
+  // is the same silent no-op as a message that never mentioned the bot:
+  // no "On it", no request row, no agent launch.
+  const prepared = prepareNewRequest(msg.text);
+  if (!prepared) return;
 
-  const rawPrompt = stripDevbotPrefix(msg.text) || msg.text;
   // `@devbot new …` always starts a fresh agent. Anything else that matches
   // an open bug is a follow-up on that agent (see src/related.ts).
-  const forceNew = wantsFreshAgent(rawPrompt);
-  const prompt = forceNew
-    ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
-    : rawPrompt;
+  const { prompt, forceNew } = prepared;
   const threadId = msg.threadId;
 
   if (!forceNew) {
