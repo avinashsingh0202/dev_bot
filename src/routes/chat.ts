@@ -143,6 +143,33 @@ export function stripDevbotPrefix(text: string): string {
   return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
+/**
+ * Whole message is only a greeting ("hi", "hello there", "good morning").
+ * A greeting plus a request ("hi, fix the login") is a real request.
+ */
+const GREETING_RE =
+  /^(?:(?:hi+|hey+|hello+|heya|hiya|howdy|yo|sup|greetings)(?:\s+there)?|what'?s\s+up|good\s+(?:morning|afternoon|evening|day))[.!?,\s]*$/i;
+
+export function isGreeting(text: string): boolean {
+  return GREETING_RE.test(text.trim());
+}
+
+/**
+ * Welcome for a bare greeting. Four actions, no questions, no internal tools.
+ * Static on purpose — the reply must stay generic.
+ */
+export function buildGreetingReply(): string {
+  return [
+    "Hi! Glad you are here.",
+    "",
+    "I can do these right away:",
+    "1. Create a new task or card for a feature or a bug.",
+    "2. Start a code change and open a pull request.",
+    "3. Check the status of ongoing work.",
+    "4. Get help on a topic.",
+  ].join("\n");
+}
+
 function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -271,6 +298,12 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
     : rawPrompt;
   const threadId = msg.threadId;
+
+  // "hi" is not work. Welcome the person and stop — do not open a request.
+  if (isGreeting(prompt)) {
+    await postMessage(msg.channelId, threadId, buildGreetingReply());
+    return;
+  }
 
   if (!forceNew) {
     const open = await listReusableRequests({

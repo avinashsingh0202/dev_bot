@@ -56,6 +56,8 @@ Ignores events where `senderId === BOT_USER_ID` (when set). Does **not** act on 
 
 **New request trigger:** trimmed `body` must **start with** `@devbot` (case-insensitive), e.g. `@devbot test`. That prefix is stripped for the agent prompt. Mid-message `@devbot` does not start a request. Thread replies on an existing request still work without `@devbot` again. Typical `action`: `chatMessageSent`.
 
+A message that is only a greeting (`@devbot hi`, `hello`, `hey`, `good morning`) gets a short welcome with four actions — create a task or card, start a code change, check status, or get help — and does not start work.
+
 **Related bug (same agent):** a new `@devbot` report in that conversation is sent to an open agent when it names that agent's branch or PR, shares enough distinctive words with the open report, or says "same bug" / "still broken" while only one request is open. That is a Cursor follow-up on the same branch, which avoids a second agent launch. `@devbot new …` always starts a fresh agent. If the matched agent is still running, the report waits and is sent once when that run finishes.
 
 **POC allowlists** (env, comma-separated; empty = allow all for that dimension). Non-matches are ignored with **no reply**:
