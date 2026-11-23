@@ -17,6 +17,7 @@ import {
 import { postMessage } from "../clients/chat.js";
 import { sendFollowup } from "../clients/cursor.js";
 import { routeRelatedReport } from "../followup.js";
+import { greetingReply, isInitialGreeting } from "../greeting.js";
 import { enqueueOrLaunch } from "../queue.js";
 import {
   pickRelatedRequest,
@@ -143,6 +144,30 @@ export function stripDevbotPrefix(text: string): string {
   return text.trim().replace(/^@devbot\b\s*/i, "").trim();
 }
 
+export type UnthreadedChatPlan =
+  | { action: "greet"; reply: string }
+  | { action: "ignore" }
+  | { action: "dispatch"; prompt: string; forceNew: boolean };
+
+/**
+ * What to do with a message that is not a reply on an existing request.
+ * A greeting gets the fixed welcome. Other text launches only when it
+ * starts with @devbot. Mid-channel chat is ignored.
+ */
+export function planUnthreadedChat(text: string): UnthreadedChatPlan {
+  if (isInitialGreeting(text)) {
+    return { action: "greet", reply: greetingReply() };
+  }
+  if (!startsWithDevbotMention(text)) return { action: "ignore" };
+
+  const rawPrompt = stripDevbotPrefix(text) || text;
+  const forceNew = wantsFreshAgent(rawPrompt);
+  const prompt = forceNew
+    ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
+    : rawPrompt;
+  return { action: "dispatch", prompt, forceNew };
+}
+
 function normalizeCommand(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -260,16 +285,18 @@ async function processChatMessage(msg: ParsedChatMessage): Promise<void> {
     }
   }
 
-  // New request only when trimmed body starts with @devbot (not every allowlisted msg)
-  if (!startsWithDevbotMention(msg.text)) return;
+  // Greeting or a new @devbot request. Other channel messages are ignored.
+  // Allowlist already ran, so a greeting from someone else gets no reply.
+  const plan = planUnthreadedChat(msg.text);
+  if (plan.action === "ignore") return;
+  if (plan.action === "greet") {
+    await postMessage(msg.channelId, msg.threadId, plan.reply);
+    return;
+  }
 
-  const rawPrompt = stripDevbotPrefix(msg.text) || msg.text;
   // `@devbot new …` always starts a fresh agent. Anything else that matches
   // an open bug is a follow-up on that agent (see src/related.ts).
-  const forceNew = wantsFreshAgent(rawPrompt);
-  const prompt = forceNew
-    ? stripFreshAgentPrefix(rawPrompt) || rawPrompt
-    : rawPrompt;
+  const { prompt, forceNew } = plan;
   const threadId = msg.threadId;
 
   if (!forceNew) {
